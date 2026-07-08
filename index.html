@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>自由聊天室</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1220; --panel:#1a1e33; --panel2:#232849; --line:#32395f;
+    --text:#e8eaf6; --muted:#9aa0c3; --accent:#6c8cff; --accent2:#22c99d;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:"PingFang TC","Microsoft JhengHei","Noto Sans TC",sans-serif;
+    background:var(--bg); color:var(--text);
+    display:flex; flex-direction:column; height:100dvh; overflow:hidden;
+  }
+  button{font-family:inherit; cursor:pointer; border:none; border-radius:10px;}
+  input{font-family:inherit;}
+
+  /* ===== 共用 ===== */
+  .hidden{display:none !important;}
+  .btn{
+    background:var(--accent); color:#fff; padding:10px 18px; font-size:15px;
+    border-radius:10px; transition:filter .15s;
+  }
+  .btn:hover{filter:brightness(1.15);}
+  .btn.green{background:var(--accent2); color:#06281f;}
+  .btn.ghost{background:transparent; color:var(--muted); border:1px solid var(--line);}
+  .field{
+    width:100%; background:var(--panel2); border:1px solid var(--line); color:var(--text);
+    padding:10px 12px; border-radius:10px; font-size:15px; outline:none;
+  }
+  .field:focus{border-color:var(--accent);}
+  label.lbl{display:block; font-size:13px; color:var(--muted); margin:14px 0 6px;}
+
+  /* ===== 大廳 ===== */
+  #lobby{flex:1; overflow-y:auto; padding:24px 16px 60px;}
+  .wrap{max-width:640px; margin:0 auto;}
+  h1{font-size:26px; margin-bottom:4px;}
+  .sub{color:var(--muted); font-size:14px; margin-bottom:20px;}
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:18px; margin-bottom:18px;
+  }
+  .card h2{font-size:17px; margin-bottom:4px;}
+  .colorRow{display:flex; align-items:center; gap:12px;}
+  .colorRow input[type=color]{
+    width:46px; height:38px; border:none; background:transparent; cursor:pointer; padding:0;
+  }
+  #nickPreview{font-weight:bold; font-size:15px;}
+  .rowBtns{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;}
+  #roomList{display:flex; flex-direction:column; gap:10px;}
+  .roomItem{
+    display:flex; justify-content:space-between; align-items:center; gap:10px;
+    background:var(--panel2); border:1px solid var(--line); border-radius:12px;
+    padding:12px 14px; cursor:pointer; transition:border-color .15s;
+  }
+  .roomItem:hover{border-color:var(--accent);}
+  .roomItem .t{font-size:15px; font-weight:bold;}
+  .roomItem .id{font-size:12px; color:var(--muted); margin-top:2px;}
+  .emptyHint{color:var(--muted); font-size:14px; text-align:center; padding:14px 0;}
+  #connStatus{
+    position:fixed; bottom:0; left:0; right:0; text-align:center;
+    font-size:12px; padding:6px; color:var(--muted); background:rgba(15,18,32,.9);
+  }
+  #connStatus.ok{color:var(--accent2);}
+  #connStatus.bad{color:#ff7b7b;}
+
+  /* ===== 聊天室 ===== */
+  #chat{flex:1; display:flex; flex-direction:column; min-height:0;}
+  #chatHeader{
+    display:flex; align-items:center; gap:10px; padding:10px 14px;
+    background:var(--panel); border-bottom:1px solid var(--line); flex-shrink:0;
+  }
+  #chatHeader .info{flex:1; min-width:0;}
+  #chatTopic{font-size:16px; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  #chatRoomId{font-size:12px; color:var(--muted);}
+  #msgs{
+    flex:1; overflow-y:auto; padding:14px; display:flex; flex-direction:column; gap:8px;
+  }
+  .msg{max-width:88%; word-break:break-word;}
+  .msg .nick{font-weight:bold; font-size:14px; margin-right:6px;}
+  .msg .time{font-size:11px; color:var(--muted); margin-left:6px;}
+  .msg .body{font-size:15px; line-height:1.5;}
+  .msg.mine{align-self:flex-end; text-align:right;}
+  .msg.mine .bubble{background:var(--panel2); border:1px solid var(--line);}
+  .bubble{
+    display:inline-block; background:var(--panel); border:1px solid var(--line);
+    border-radius:12px; padding:8px 12px; margin-top:3px; text-align:left;
+  }
+  .sys{align-self:center; font-size:12.5px; color:var(--muted); background:var(--panel);
+    border-radius:20px; padding:4px 14px;}
+  #inputBar{
+    display:flex; gap:8px; padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:var(--panel); border-top:1px solid var(--line); flex-shrink:0;
+  }
+  #msgInput{flex:1;}
+
+  @media (max-width:480px){
+    h1{font-size:22px;}
+    #lobby{padding:18px 12px 60px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= 大廳 ================= -->
+<div id="lobby">
+  <div class="wrap">
+    <h1>💬 自由聊天室</h1>
+    <div class="sub">免註冊、免資料庫，手機電腦皆可用。開一間房，把房號分享給朋友就能聊！</div>
+
+    <div class="card">
+      <h2>我的身分</h2>
+      <label class="lbl">暱稱</label>
+      <input id="nickInput" class="field" maxlength="16" placeholder="輸入你的暱稱">
+      <label class="lbl">文字顏色</label>
+      <div class="colorRow">
+        <input type="color" id="colorInput" value="#6c8cff">
+        <span id="nickPreview">預覽：你的暱稱長這樣</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>開新聊天室</h2>
+      <label class="lbl">聊天室主題</label>
+      <input id="topicInput" class="field" maxlength="40" placeholder="例如：週末露營討論">
+      <div class="rowBtns">
+        <button class="btn green" onclick="createRoom()">＋ 建立並進入</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>加入聊天室</h2>
+      <label class="lbl">輸入房號</label>
+      <div class="rowBtns" style="margin-top:0;">
+        <input id="joinIdInput" class="field" style="flex:1;" maxlength="12" placeholder="例如：A1B2C3">
+        <button class="btn" onclick="joinById()">加入</button>
+      </div>
+      <label class="lbl">或從公開房間列表選擇（最近有人開的房）</label>
+      <div id="roomList"><div class="emptyHint">正在載入房間列表…</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 聊天室 ================= -->
+<div id="chat" class="hidden">
+  <div id="chatHeader">
+    <button class="btn ghost" onclick="leaveRoom()">← 離開</button>
+    <div class="info">
+      <div id="chatTopic"></div>
+      <div id="chatRoomId"></div>
+    </div>
+    <button class="btn ghost" onclick="copyRoomId()" id="copyBtn">複製房號</button>
+  </div>
+  <div id="msgs"></div>
+  <div id="inputBar">
+    <input id="msgInput" class="field" maxlength="500" placeholder="輸入訊息…" autocomplete="off">
+    <button class="btn" onclick="sendMsg()">送出</button>
+  </div>
+</div>
+
+<div id="connStatus">連線中…</div>
+
+<script>
+/* ========== 設定 ========== */
+const BROKERS = [
+  "wss://broker.emqx.io:8084/mqtt",
+  "wss://broker.hivemq.com:8884/mqtt"
+];
+const NS = "freechat-tw-v1";          // 頻道命名空間，避免與他人衝突
+const LOBBY_TOPIC = NS + "/lobby/+";  // 房間公告
+let client = null, brokerIdx = 0;
+let me = { nick:"", color:"#6c8cff" };
+let room = null;                      // {id, topic}
+const rooms = {};                     // 大廳房間列表
+
+/* ========== 小工具 ========== */
+const $ = id => document.getElementById(id);
+const esc = s => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
+function randId(n=6){
+  const c = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r = "";
+  for(let i=0;i<n;i++) r += c[Math.floor(Math.random()*c.length)];
+  return r;
+}
+function fmtTime(ts){
+  const d = new Date(ts);
+  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0");
+}
+function store(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function load(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+/* ========== 身分 ========== */
+$("nickInput").value = load("fc_nick") || "";
+$("colorInput").value = load("fc_color") || "#6c8cff";
+function refreshPreview(){
+  const n = $("nickInput").value.trim() || "你的暱稱長這樣";
+  const p = $("nickPreview");
+  p.textContent = "預覽：" + n;
+  p.style.color = $("colorInput").value;
+}
+$("nickInput").addEventListener("input", refreshPreview);
+$("colorInput").addEventListener("input", refreshPreview);
+refreshPreview();
+
+function getIdentity(){
+  const nick = $("nickInput").value.trim();
+  if(!nick){ alert("請先輸入暱稱！"); $("nickInput").focus(); return null; }
+  me.nick = nick;
+  me.color = $("colorInput").value;
+  store("fc_nick", nick); store("fc_color", me.color);
+  return me;
+}
+
+/* ========== MQTT 連線 ========== */
+function setStatus(text, cls){
+  const el = $("connStatus");
+  el.textContent = text; el.className = cls || "";
+}
+function connect(){
+  setStatus("連線中…（" + (brokerIdx+1) + "/" + BROKERS.length + "）","");
+  client = mqtt.connect(BROKERS[brokerIdx], {
+    clientId: "fc_" + randId(10),
+    keepalive: 30, reconnectPeriod: 3000, connectTimeout: 8000
+  });
+  client.on("connect", () => {
+    setStatus("✓ 已連上伺服器", "ok");
+    client.subscribe(LOBBY_TOPIC);
+    if(room) client.subscribe(NS + "/room/" + room.id);
+  });
+  client.on("message", onMessage);
+  client.on("error", () => {
+    client.end(true);
+    brokerIdx = (brokerIdx + 1) % BROKERS.length;
+    setTimeout(connect, 1000);
+  });
+  client.on("offline", () => setStatus("連線中斷，重新連線中…", "bad"));
+}
+function onMessage(topic, payload){
+  let data;
+  try{ data = JSON.parse(payload.toString()); }catch(e){ return; }
+  if(topic.startsWith(NS + "/lobby/")){
+    const id = topic.split("/").pop();
+    if(data && data.topic){ rooms[id] = data; renderRoomList(); }
+    return;
+  }
+  if(room && topic === NS + "/room/" + room.id) renderMsg(data);
+}
+
+/* ========== 大廳 ========== */
+function renderRoomList(){
+  const list = Object.entries(rooms)
+    .sort((a,b) => (b[1].created||0) - (a[1].created||0))
+    .slice(0, 30);
+  const box = $("roomList");
+  if(!list.length){
+    box.innerHTML = '<div class="emptyHint">目前沒有公開房間，開一間吧！</div>';
+    return;
+  }
+  box.innerHTML = list.map(([id,r]) =>
+    `<div class="roomItem" onclick="enterRoom('${id}', '${esc(r.topic).replace(/'/g,"&#39;")}')">
+       <div><div class="t">${esc(r.topic)}</div><div class="id">房號 ${id}</div></div>
+       <button class="btn" style="pointer-events:none;">進入</button>
+     </div>`).join("");
+}
+function createRoom(){
+  if(!getIdentity()) return;
+  const t = $("topicInput").value.trim();
+  if(!t){ alert("請輸入聊天室主題！"); $("topicInput").focus(); return; }
+  const id = randId();
+  // 用 retained message 在大廳公告房間，之後進來的人都看得到
+  client.publish(NS + "/lobby/" + id,
+    JSON.stringify({ topic:t, created:Date.now() }), { retain:true });
+  enterRoom(id, t);
+}
+function joinById(){
+  if(!getIdentity()) return;
+  const id = $("joinIdInput").value.trim().toUpperCase();
+  if(!id){ alert("請輸入房號！"); return; }
+  enterRoom(id, rooms[id] ? rooms[id].topic : "房號 " + id);
+}
+
+/* ========== 聊天室 ========== */
+function enterRoom(id, topicName){
+  if(!getIdentity()) return;
+  room = { id, topic: topicName };
+  client.subscribe(NS + "/room/" + id);
+  $("chatTopic").textContent = topicName;
+  $("chatRoomId").textContent = "房號 " + id + "｜分享給朋友即可加入";
+  $("msgs").innerHTML = "";
+  $("lobby").classList.add("hidden");
+  $("chat").classList.remove("hidden");
+  publish({ type:"sys", text: me.nick + " 加入了聊天室" });
+  $("msgInput").focus();
+}
+function leaveRoom(){
+  if(room){
+    publish({ type:"sys", text: me.nick + " 離開了聊天室" });
+    client.unsubscribe(NS + "/room/" + room.id);
+  }
+  room = null;
+  $("chat").classList.add("hidden");
+  $("lobby").classList.remove("hidden");
+}
+function publish(obj){
+  if(!client || !room) return;
+  obj.ts = Date.now();
+  client.publish(NS + "/room/" + room.id, JSON.stringify(obj));
+}
+function sendMsg(){
+  const t = $("msgInput").value.trim();
+  if(!t) return;
+  publish({ type:"msg", nick:me.nick, color:me.color, text:t, uid:clientUid });
+  $("msgInput").value = "";
+  $("msgInput").focus();
+}
+const clientUid = randId(8);
+$("msgInput").addEventListener("keydown", e => {
+  if(e.key === "Enter" && !e.isComposing) sendMsg();
+});
+function renderMsg(d){
+  const box = $("msgs");
+  const el = document.createElement("div");
+  if(d.type === "sys"){
+    el.className = "sys";
+    el.textContent = d.text;
+  }else if(d.type === "msg"){
+    el.className = "msg" + (d.uid === clientUid ? " mine" : "");
+    const color = /^#[0-9a-fA-F]{6}$/.test(d.color || "") ? d.color : "#e8eaf6";
+    el.innerHTML =
+      `<span class="nick" style="color:${color}">${esc(d.nick || "匿名")}</span>` +
+      `<span class="time">${fmtTime(d.ts)}</span>` +
+      `<div class="bubble"><span class="body" style="color:${color}">${esc(d.text || "")}</span></div>`;
+  }else return;
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+function copyRoomId(){
+  if(!room) return;
+  const done = () => {
+    $("copyBtn").textContent = "已複製！";
+    setTimeout(() => $("copyBtn").textContent = "複製房號", 1500);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(room.id).then(done).catch(() => prompt("房號：", room.id));
+  }else prompt("房號：", room.id);
+}
+window.addEventListener("beforeunload", () => {
+  if(room && client) publish({ type:"sys", text: me.nick + " 離開了聊天室" });
+});
+
+connect();
+</script>
+</body>
+</html>
