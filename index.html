@@ -350,4 +350,18 @@ function renderMsg(d){
 function copyRoomId(){
   if(!room) return;
   const done = () => {
-    $("c
+    $("copyBtn").textContent = "已複製！";
+    setTimeout(() => $("copyBtn").textContent = "複製房號", 1500);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(room.id).then(done).catch(() => prompt("房號：", room.id));
+  }else prompt("房號：", room.id);
+}
+window.addEventListener("beforeunload", () => {
+  if(room && client) publish({ type:"sys", text: me.nick + " 離開了聊天室" });
+});
+
+connect();
+</script>
+</body>
+</html>
