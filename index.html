@@ -68,6 +68,11 @@
   }
   #connStatus.ok{color:var(--accent2);}
   #connStatus.bad{color:#ff7b7b;}
+  body.inchat #connStatus{display:none;}
+  #connDot{display:inline-block; width:9px; height:9px; border-radius:50%;
+    background:#9aa0c3; margin-right:6px; flex-shrink:0;}
+  #connDot.ok{background:var(--accent2);}
+  #connDot.bad{background:#ff7b7b;}
 
   /* ===== 聊天室 ===== */
   #chat{flex:1; display:flex; flex-direction:column; min-height:0;}
@@ -151,7 +156,7 @@
   <div id="chatHeader">
     <button class="btn ghost" onclick="leaveRoom()">← 離開</button>
     <div class="info">
-      <div id="chatTopic"></div>
+      <div id="chatTopic"><span id="connDot" title="連線狀態"></span><span id="chatTopicText"></span></div>
       <div id="chatRoomId"></div>
     </div>
     <button class="btn ghost" onclick="copyRoomId()" id="copyBtn">複製房號</button>
@@ -219,6 +224,8 @@ function getIdentity(){
 function setStatus(text, cls){
   const el = $("connStatus");
   el.textContent = text; el.className = cls || "";
+  $("connDot").className = cls || "";
+  $("connDot").title = text;
 }
 function connect(){
   setStatus("連線中…（" + (brokerIdx+1) + "/" + BROKERS.length + "）","");
@@ -288,11 +295,12 @@ function enterRoom(id, topicName){
   if(!getIdentity()) return;
   room = { id, topic: topicName };
   client.subscribe(NS + "/room/" + id);
-  $("chatTopic").textContent = topicName;
+  $("chatTopicText").textContent = topicName;
   $("chatRoomId").textContent = "房號 " + id + "｜分享給朋友即可加入";
   $("msgs").innerHTML = "";
   $("lobby").classList.add("hidden");
   $("chat").classList.remove("hidden");
+  document.body.classList.add("inchat");
   publish({ type:"sys", text: me.nick + " 加入了聊天室" });
   $("msgInput").focus();
 }
@@ -304,6 +312,7 @@ function leaveRoom(){
   room = null;
   $("chat").classList.add("hidden");
   $("lobby").classList.remove("hidden");
+  document.body.classList.remove("inchat");
 }
 function publish(obj){
   if(!client || !room) return;
@@ -341,18 +350,4 @@ function renderMsg(d){
 function copyRoomId(){
   if(!room) return;
   const done = () => {
-    $("copyBtn").textContent = "已複製！";
-    setTimeout(() => $("copyBtn").textContent = "複製房號", 1500);
-  };
-  if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(room.id).then(done).catch(() => prompt("房號：", room.id));
-  }else prompt("房號：", room.id);
-}
-window.addEventListener("beforeunload", () => {
-  if(room && client) publish({ type:"sys", text: me.nick + " 離開了聊天室" });
-});
-
-connect();
-</script>
-</body>
-</html>
+    $("c
