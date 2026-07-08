@@ -227,16 +227,24 @@ function setStatus(text, cls){
   $("connDot").className = cls || "";
   $("connDot").title = text;
 }
+function getClientId(){
+  // 同一分頁重整後沿用相同 ID，讓伺服器能補送斷線期間的訊息
+  try{
+    let cid = sessionStorage.getItem("fc_cid");
+    if(!cid){ cid = "fc_" + randId(10); sessionStorage.setItem("fc_cid", cid); }
+    return cid;
+  }catch(e){ return "fc_" + randId(10); }
+}
 function connect(){
   setStatus("連線中…（" + (brokerIdx+1) + "/" + BROKERS.length + "）","");
   client = mqtt.connect(BROKERS[brokerIdx], {
-    clientId: "fc_" + randId(10),
+    clientId: getClientId(), clean: false,
     keepalive: 30, reconnectPeriod: 3000, connectTimeout: 8000
   });
   client.on("connect", () => {
     setStatus("✓ 已連上伺服器", "ok");
-    client.subscribe(LOBBY_TOPIC);
-    if(room) client.subscribe(NS + "/room/" + room.id);
+    client.subscribe(LOBBY_TOPIC, { qos: 1 });
+    if(room) client.subscribe(NS + "/room/" + room.id, { qos: 1 });
   });
   client.on("message", onMessage);
   client.on("error", () => {
@@ -280,7 +288,7 @@ function createRoom(){
   const id = randId();
   // 用 retained message 在大廳公告房間，之後進來的人都看得到
   client.publish(NS + "/lobby/" + id,
-    JSON.stringify({ topic:t, created:Date.now() }), { retain:true });
+    JSON.stringify({ topic:t, created:Date.now() }), { retain:true, qos:1 });
   enterRoom(id, t);
 }
 function joinById(){
@@ -294,7 +302,7 @@ function joinById(){
 function enterRoom(id, topicName){
   if(!getIdentity()) return;
   room = { id, topic: topicName };
-  client.subscribe(NS + "/room/" + id);
+  client.subscribe(NS + "/room/" + id, { qos: 1 });
   $("chatTopicText").textContent = topicName;
   $("chatRoomId").textContent = "房號 " + id + "｜分享給朋友即可加入";
   $("msgs").innerHTML = "";
@@ -317,7 +325,7 @@ function leaveRoom(){
 function publish(obj){
   if(!client || !room) return;
   obj.ts = Date.now();
-  client.publish(NS + "/room/" + room.id, JSON.stringify(obj));
+  client.publish(NS + "/room/" + room.id, JSON.stringify(obj), { qos: 1 });
 }
 function sendMsg(){
   const t = $("msgInput").value.trim();
